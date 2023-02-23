@@ -34,20 +34,20 @@ class LSG_NET(nn.Module):
         # weighted(channel wise) according to H_1-t(vo) using cosine sim, sum it to x'_i
 
         # dot product
-        dot_prod = torch.sum(torch.sum(features.unsqueeze(2).repeat(1, 1, s - 1, 1, 1, 1)
-                                     * vo_features.unsqueeze(1).repeat(1, s, 1, 1, 1, 1), dim=(3, 4, 5)))
-        scalar_x = torch.sqrt(torch.sum(torch.square(features.unsqueeze(2).repeat(1, 1, s - 1, 1, 1, 1)), dim=(3,4,5)))
-        scalar_h = torch.sqrt(torch.sum(torch.square(vo_features.unsqueeze(1).repeat(1, s, 1, 1, 1, 1)), dim=(3,4,5)))
+        dot_prod = torch.sum(features.unsqueeze(2).repeat(1, 1, s - 1, 1, 1, 1)
+                                     * vo_features.unsqueeze(1).repeat(1, s, 1, 1, 1, 1), dim=(4, 5))
+        scalar_x = torch.sqrt(torch.sum(torch.square(features.unsqueeze(2).repeat(1, 1, s - 1, 1, 1, 1)), dim=(4,5)))
+        scalar_h = torch.sqrt(torch.sum(torch.square(vo_features.unsqueeze(1).repeat(1, s, 1, 1, 1, 1)), dim=(4,5)))
         weight = dot_prod/(scalar_x*scalar_h)                                               # b, s, s-1
 
         # x'
-        weighted_global_features = torch.sum(weight.view(b,s,s-1, 1,1,1)                    # b, s, 512, 7, 7
-                                             * features.unsqueeze(2).repeat(1, 1, s-1, 1, 1, 1), dim=(2,3,4,5))
+        weighted_global_features = torch.sum(weight.view(b,s,s-1,512,1,1)                    # b, s, 512, 7, 7
+                                             * features.unsqueeze(2).repeat(1, 1, s-1, 1, 1, 1), dim=(2))
 
         vo_feature = self.vo_gap(vo_features.view(b*(s-1), 512, 7, 7)).view(-1, 2048)
         vo_out = [self.vo_fc[i](vo_feature) for i in range(2)]
 
-        global_feature = self.global_gap(weighted_global_features.view(b*s, -1))
+        global_feature = self.global_gap(weighted_global_features.view(b*s, 512, 7, 7)).view(-1, 2048)
         global_out = [self.global_fc[i](global_feature) for i in range(2)]
 
         return vo_out, global_out
