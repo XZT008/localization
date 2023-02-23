@@ -4,6 +4,7 @@ import torch.nn as nn
 from torchvision.models import resnet34
 from torchvision.models.resnet import BasicBlock
 import torch.nn.functional as F
+import math
 
 
 class LSG_NET(nn.Module):
@@ -21,7 +22,7 @@ class LSG_NET(nn.Module):
         self.global_fc = nn.ModuleList([nn.Linear(2048, 3) for i in range(2)])
 
     # Input: seq_img, b, s, 3, 224, 224
-    # Output: VO_OUT: [(b*(s-1), 3), _], GLOBAL_OUT: [(b*s, 3), _]
+    # Output: VO_OUT: [(b,s-1, 3), _], GLOBAL_OUT: [(b,s,3), _], JOINT_OUT: [(b,s-1, 3), _]
     def forward(self, seq_img):
         b = seq_img.size()[0]
         s = seq_img.size()[1]
@@ -45,16 +46,30 @@ class LSG_NET(nn.Module):
                                              * features.unsqueeze(2).repeat(1, 1, s-1, 1, 1, 1), dim=(2))
 
         vo_feature = self.vo_gap(vo_features.view(b*(s-1), 512, 7, 7)).view(-1, 2048)
-        vo_out = [self.vo_fc[i](vo_feature) for i in range(2)]
+        vo_out = [self.vo_fc[i](vo_feature).view(b,s-1,3) for i in range(2)]
 
         global_feature = self.global_gap(weighted_global_features.view(b*s, 512, 7, 7)).view(-1, 2048)
-        global_out = [self.global_fc[i](global_feature) for i in range(2)]
+        global_out = [self.global_fc[i](global_feature).view(b,s,3) for i in range(2)]
 
-        return vo_out, global_out
+        joint_out = [global_out[i][:,:-1]+vo_out[i] for i in range(2)]
+
+        return vo_out, global_out, joint_out
+
+    def loss(self, seq_img, vo_tar, global_tar, beta, gamma):
+        vo_out, global_out, joint_out = self(seq_img)
+        loss_vo = [F.l1_loss(vo_out[i], vo_tar[i]) for i in range(2)]
+        loss_global = [F.l1_loss(global_out[i], global_tar[i]) for i in range(2)]
+        loss_joint = [F.l1_loss(joint_out[i], global_tar[i][:,1:]) for i in range(2)]
+
+        total_loss = (loss_global[0]+loss_joint[0]+loss_global[0])*math.exp(-beta) + \
+                     (loss_global[1] + loss_joint[1] + loss_global[1])*math.exp(-gamma) + 3*(beta+gamma)
+        return total_loss
 
 
 if __name__ == '__main__':
     model = LSG_NET().cuda()
     inp = torch.randn(10, 20, 3, 224, 224).cuda()
-    out = model(inp)
+    global_tar = [torch.randn(10, 20, 3).cuda(), torch.randn(10, 20, 3).cuda()]
+    vo_tar = [torch.randn(10, 19, 3).cuda(), torch.randn(10, 19, 3).cuda()]
+    out = model.loss(inp, vo_tar, global_tar, 0.1, 0.1)
     print()
